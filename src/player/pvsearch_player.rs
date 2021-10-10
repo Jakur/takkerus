@@ -18,17 +18,17 @@
 //
 
 use std::any::Any;
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
 use zero_sum::analysis::search::{PvSearch, PvSearchAnalysis, Search};
-use zero_sum::impls::tak::{Color, State};
 use zero_sum::impls::tak::evaluator::StaticEvaluator;
+use zero_sum::impls::tak::{Color, State};
 
-use game::Message;
-use player::{Player, PlayTakPlayer};
+use crate::game::Message;
+use crate::player::{PlayTakPlayer, Player};
 
 pub struct PvSearchPlayer {
     pvsearch: Arc<Mutex<PvSearch<State, StaticEvaluator>>>,
@@ -55,7 +55,11 @@ impl PvSearchPlayer {
 }
 
 impl Player for PvSearchPlayer {
-    fn initialize(&mut self, to_game: Sender<(Color, Message)>, opponent: &Player) -> Result<Sender<Message>, String> {
+    fn initialize(
+        &mut self,
+        to_game: Sender<(Color, Message)>,
+        opponent: &dyn Player,
+    ) -> Result<Sender<Message>, String> {
         let pvsearch = self.pvsearch.clone();
         let (sender, receiver) = mpsc::channel();
         let vs_playtak = opponent.as_any().is::<PlayTakPlayer>();
@@ -77,8 +81,14 @@ impl Player for PvSearchPlayer {
 
                         thread::spawn(move || {
                             let start_search = Instant::now();
-                            let analysis = pvsearch.lock().unwrap().search(&state, Some(interrupt_receiver));
-                            let pvsearch_analysis = analysis.as_any().downcast_ref::<PvSearchAnalysis<State, StaticEvaluator>>().unwrap();
+                            let analysis = pvsearch
+                                .lock()
+                                .unwrap()
+                                .search(&state, Some(interrupt_receiver));
+                            let pvsearch_analysis = analysis
+                                .as_any()
+                                .downcast_ref::<PvSearchAnalysis<State, StaticEvaluator>>()
+                                .unwrap();
                             let elapsed_search = start_search.elapsed();
 
                             let mut interrupt = interrupt.lock().unwrap();
@@ -89,19 +99,23 @@ impl Player for PvSearchPlayer {
                             }
 
                             if let Some(ply) = pvsearch_analysis.principal_variation.first() {
-                                println!("[PVSearch] Decision time (depth {}): {:.3} seconds{}",
+                                println!(
+                                    "[PVSearch] Decision time (depth {}): {:.3} seconds{}",
                                     pvsearch_analysis.principal_variation.len(),
-                                    elapsed_search.as_secs() as f32 + elapsed_search.subsec_nanos() as f32 / 1_000_000_000.0,
+                                    elapsed_search.as_secs() as f32
+                                        + elapsed_search.subsec_nanos() as f32 / 1_000_000_000.0,
                                     if vs_playtak {
                                         format!(", Evaluation: {}", pvsearch_analysis.evaluation)
                                     } else {
                                         String::new()
                                     },
                                 );
-                                to_game.send((color.unwrap(), Message::MoveResponse(ply.clone()))).ok();
+                                to_game
+                                    .send((color.unwrap(), Message::MoveResponse(ply.clone())))
+                                    .ok();
                             }
                         });
-                    },
+                    }
                     Message::GameOver => {
                         let mut interrupt = interrupt.lock().unwrap();
                         if let Some(ref interrupt_sender) = *interrupt {
@@ -110,7 +124,7 @@ impl Player for PvSearchPlayer {
                         *interrupt = None;
 
                         break;
-                    },
+                    }
                     _ => (),
                 }
             }
@@ -120,7 +134,8 @@ impl Player for PvSearchPlayer {
     }
 
     fn get_name(&self) -> String {
-        format!("Takkerus{} (PVSearch{})",
+        format!(
+            "Takkerus{} (PVSearch{})",
             if let Some(version) = option_env!("CARGO_PKG_VERSION") {
                 format!(" v{}", version)
             } else {
@@ -136,7 +151,7 @@ impl Player for PvSearchPlayer {
         )
     }
 
-    fn as_any(&self) -> &Any {
+    fn as_any(&self) -> &dyn Any {
         self
     }
 }

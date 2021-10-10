@@ -20,17 +20,17 @@
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use zero_sum::analysis::search::{PvSearch, PvSearchAnalysis, Search};
-use zero_sum::impls::tak::*;
 use zero_sum::impls::tak::evaluator::StaticEvaluator;
+use zero_sum::impls::tak::*;
 use zero_sum::State as StateTrait;
 
-use game::Message;
+use crate::game::Message;
 
 use super::game_type::{GameType, ListedGame, Seek};
 use super::message_queue::MessageQueue;
@@ -38,8 +38,8 @@ use super::parse;
 use super::PlayTakPlayer;
 
 pub fn write_stream(stream: &mut TcpStream, arguments: &[&str]) -> Result<(), io::Error> {
-    try!(write!(*stream, "{}\n", arguments.join(" ")));
-    try!(stream.flush());
+    write!(*stream, "{}\n", arguments.join(" "))?;
+    stream.flush()?;
     Ok(())
 }
 
@@ -64,34 +64,40 @@ pub fn start_reader(stream: TcpStream, message_queue: &MessageQueue) {
 pub fn start_pinger(stream: &Arc<Mutex<TcpStream>>) {
     let stream = stream.clone();
 
-    thread::spawn(move || {
-        loop {
-            thread::sleep(Duration::new(30, 0));
+    thread::spawn(move || loop {
+        thread::sleep(Duration::new(30, 0));
 
-            let mut stream = stream.lock().unwrap();
+        let mut stream = stream.lock().unwrap();
 
-            if let Err(_) = write_stream(&mut *stream, &["PING"]) {
-                break;
-            }
+        if let Err(_) = write_stream(&mut *stream, &["PING"]) {
+            break;
         }
     });
 }
 
 pub fn write_client_name(stream: &Arc<Mutex<TcpStream>>) {
-    write_stream(&mut *stream.lock().unwrap(), &[
-        "Client",
-        &format!(
-            "Takkerus{}",
-            if let Some(version) = option_env!("CARGO_PKG_VERSION") {
-                format!(" v{}", version)
-            } else {
-                String::new()
-            }
-        ),
-    ]).ok();
+    write_stream(
+        &mut *stream.lock().unwrap(),
+        &[
+            "Client",
+            &format!(
+                "Takkerus{}",
+                if let Some(version) = option_env!("CARGO_PKG_VERSION") {
+                    format!(" v{}", version)
+                } else {
+                    String::new()
+                }
+            ),
+        ],
+    )
+    .ok();
 }
 
-pub fn login(stream: &Arc<Mutex<TcpStream>>, message_queue: &MessageQueue, player: &mut PlayTakPlayer) -> Result<(), String> {
+pub fn login(
+    stream: &Arc<Mutex<TcpStream>>,
+    message_queue: &MessageQueue,
+    player: &mut PlayTakPlayer,
+) -> Result<(), String> {
     for message in message_queue.iter() {
         if message == "Login or Register" {
             break;
@@ -123,7 +129,8 @@ pub fn login(stream: &Arc<Mutex<TcpStream>>, message_queue: &MessageQueue, playe
         if message == "Authentication failure" {
             return Err(format!("Bad password: {}", player.password));
         }
-        if message == "You're already logged in" { // XXX Does the server still send this?
+        if message == "You're already logged in" {
+            // XXX Does the server still send this?
             return Err(format!("User {} is already logged in.", player.username));
         }
         if message.starts_with("Welcome ") {
@@ -138,7 +145,11 @@ pub fn login(stream: &Arc<Mutex<TcpStream>>, message_queue: &MessageQueue, playe
     Ok(())
 }
 
-pub fn initialize_game(stream: &Arc<Mutex<TcpStream>>, message_queue: &MessageQueue, player: &mut PlayTakPlayer) -> Vec<ListedGame>{
+pub fn initialize_game(
+    stream: &Arc<Mutex<TcpStream>>,
+    message_queue: &MessageQueue,
+    player: &mut PlayTakPlayer,
+) -> Vec<ListedGame> {
     let mut game_list: Vec<ListedGame> = Vec::new();
     let message = message_queue.iter().peek().unwrap();
 
@@ -163,10 +174,7 @@ pub fn initialize_game(stream: &Arc<Mutex<TcpStream>>, message_queue: &MessageQu
                     let parts = message.split_whitespace().collect::<Vec<_>>();
 
                     if from == parts[3] {
-                        write_stream(&mut *stream.lock().unwrap(), &[
-                            "Accept",
-                            parts[2],
-                        ]).ok();
+                        write_stream(&mut *stream.lock().unwrap(), &["Accept", parts[2]]).ok();
                     }
                 }
             }
@@ -200,20 +208,25 @@ pub fn initialize_game(stream: &Arc<Mutex<TcpStream>>, message_queue: &MessageQu
                     }
 
                     if command == "evaluate" {
-                        if let Some(index) = game_list.iter().position(|game| game.p1 == invoker || game.p2 == invoker) {
+                        if let Some(index) = game_list
+                            .iter()
+                            .position(|game| game.p1 == invoker || game.p2 == invoker)
+                        {
                             let game = &game_list[index];
 
-                            write_stream(&mut *stream.lock().unwrap(), &[
-                                "Observe",
-                                game.id.split_at(5).1,
-                            ]).ok();
+                            write_stream(
+                                &mut *stream.lock().unwrap(),
+                                &["Observe", game.id.split_at(5).1],
+                            )
+                            .ok();
 
                             let plies = parse::game(message_queue, &game.id);
 
-                            write_stream(&mut *stream.lock().unwrap(), &[
-                                "Unobserve",
-                                game.id.split_at(5).1,
-                            ]).ok();
+                            write_stream(
+                                &mut *stream.lock().unwrap(),
+                                &["Unobserve", game.id.split_at(5).1],
+                            )
+                            .ok();
 
                             let state = State::from_plies(game.size, &plies).unwrap();
                             let stream = stream.clone();
@@ -253,7 +266,15 @@ pub fn initialize_game(stream: &Arc<Mutex<TcpStream>>, message_queue: &MessageQu
     game_list
 }
 
-pub fn start_game_handler(stream: &Arc<Mutex<TcpStream>>, player: &mut PlayTakPlayer) -> (Sender<Message>, Arc<Mutex<State>>, Arc<Mutex<bool>>, Arc<Mutex<bool>>) {
+pub fn start_game_handler(
+    stream: &Arc<Mutex<TcpStream>>,
+    player: &mut PlayTakPlayer,
+) -> (
+    Sender<Message>,
+    Arc<Mutex<State>>,
+    Arc<Mutex<bool>>,
+    Arc<Mutex<bool>>,
+) {
     let (sender, receiver) = mpsc::channel();
     let state = Arc::new(Mutex::new(State::new(5)));
     let undo_request = Arc::new(Mutex::new(false));
@@ -272,50 +293,55 @@ pub fn start_game_handler(stream: &Arc<Mutex<TcpStream>>, player: &mut PlayTakPl
                 match message {
                     Message::GameStart(own_color) => {
                         *color.lock().unwrap() = own_color;
-                    },
+                    }
                     Message::MoveResponse(ply) => {
                         *undo_request.lock().unwrap() = false;
 
-                        write_stream(&mut *stream.lock().unwrap(), &[
-                            &id.lock().unwrap(),
-                            &ply_to_playtak(&ply),
-                        ]).ok();
-                    },
+                        write_stream(
+                            &mut *stream.lock().unwrap(),
+                            &[&id.lock().unwrap(), &ply_to_playtak(&ply)],
+                        )
+                        .ok();
+                    }
                     Message::MoveRequest(new_state) => {
                         *state.lock().unwrap() = new_state;
-                    },
-                    Message::UndoRequest => if !(*undo_request.lock().unwrap()) { // If we haven't already requested an undo,
-                        *undo_wait.lock().unwrap() = true;
-                        write_stream(&mut *stream.lock().unwrap(), &[
-                            &id.lock().unwrap(),
-                            "RequestUndo",
-                        ]).ok();
-                    },
+                    }
+                    Message::UndoRequest => {
+                        if !(*undo_request.lock().unwrap()) {
+                            // If we haven't already requested an undo,
+                            *undo_wait.lock().unwrap() = true;
+                            write_stream(
+                                &mut *stream.lock().unwrap(),
+                                &[&id.lock().unwrap(), "RequestUndo"],
+                            )
+                            .ok();
+                        }
+                    }
                     Message::UndoAccept => {
                         let mut undo_request = undo_request.lock().unwrap();
                         if *undo_request {
                             *undo_request = false;
-                            write_stream(&mut *stream.lock().unwrap(), &[
-                                &id.lock().unwrap(),
-                                "RequestUndo",
-                            ]).ok();
+                            write_stream(
+                                &mut *stream.lock().unwrap(),
+                                &[&id.lock().unwrap(), "RequestUndo"],
+                            )
+                            .ok();
                         }
                     }
                     Message::UndoRemove => {
                         let mut undo_wait = undo_wait.lock().unwrap();
                         if *undo_wait {
                             *undo_wait = false;
-                            write_stream(&mut *stream.lock().unwrap(), &[
-                                &id.lock().unwrap(),
-                                "RemoveUndo",
-                            ]).ok();
+                            write_stream(
+                                &mut *stream.lock().unwrap(),
+                                &[&id.lock().unwrap(), "RemoveUndo"],
+                            )
+                            .ok();
                         }
-                    },
+                    }
                     Message::GameOver => {
-                        write_stream(&mut *stream.lock().unwrap(), &[
-                            "quit",
-                        ]).ok();
-                    },
+                        write_stream(&mut *stream.lock().unwrap(), &["quit"]).ok();
+                    }
                     _ => (),
                 }
             }
@@ -325,7 +351,16 @@ pub fn start_game_handler(stream: &Arc<Mutex<TcpStream>>, player: &mut PlayTakPl
     (sender, state, undo_request, undo_wait)
 }
 
-pub fn start_playtak_handler(stream: &Arc<Mutex<TcpStream>>, message_queue: MessageQueue, to_game: Sender<(Color, Message)>, state: Arc<Mutex<State>>, undo_request: Arc<Mutex<bool>>, undo_wait: Arc<Mutex<bool>>, player: &mut PlayTakPlayer, mut game_list: Vec<ListedGame>) {
+pub fn start_playtak_handler(
+    stream: &Arc<Mutex<TcpStream>>,
+    message_queue: MessageQueue,
+    to_game: Sender<(Color, Message)>,
+    state: Arc<Mutex<State>>,
+    undo_request: Arc<Mutex<bool>>,
+    undo_wait: Arc<Mutex<bool>>,
+    player: &mut PlayTakPlayer,
+    mut game_list: Vec<ListedGame>,
+) {
     let stream = stream.clone();
     let color = player.color.clone();
     let username = player.username.clone();
@@ -336,24 +371,33 @@ pub fn start_playtak_handler(stream: &Arc<Mutex<TcpStream>>, message_queue: Mess
                 if let Some((invoker, command, _)) = parse::shout(&message, &username) {
                     if command == "evaluate" {
                         // If the invoker is in a game that's not our game
-                        let (state, invoker) = if game_list.iter().position(|game|
-                            (game.p1 == invoker || game.p2 == invoker) &&
-                            (game.p1 != username && game.p2 != username)
-                        ).is_some() {
-                            let index = game_list.iter().position(|game| game.p1 == invoker || game.p2 == invoker).unwrap();
+                        let (state, invoker) = if game_list
+                            .iter()
+                            .position(|game| {
+                                (game.p1 == invoker || game.p2 == invoker)
+                                    && (game.p1 != username && game.p2 != username)
+                            })
+                            .is_some()
+                        {
+                            let index = game_list
+                                .iter()
+                                .position(|game| game.p1 == invoker || game.p2 == invoker)
+                                .unwrap();
                             let game = &game_list[index];
 
-                            write_stream(&mut *stream.lock().unwrap(), &[
-                                "Observe",
-                                game.id.split_at(5).1,
-                            ]).ok();
+                            write_stream(
+                                &mut *stream.lock().unwrap(),
+                                &["Observe", game.id.split_at(5).1],
+                            )
+                            .ok();
 
                             let plies = parse::game(&message_queue, &game.id);
 
-                            write_stream(&mut *stream.lock().unwrap(), &[
-                                "Unobserve",
-                                game.id.split_at(5).1,
-                            ]).ok();
+                            write_stream(
+                                &mut *stream.lock().unwrap(),
+                                &["Unobserve", game.id.split_at(5).1],
+                            )
+                            .ok();
 
                             (State::from_plies(game.size, &plies).unwrap(), Some(invoker))
                         } else {
@@ -410,48 +454,60 @@ pub fn start_playtak_handler(stream: &Arc<Mutex<TcpStream>>, message_queue: Mess
                     let mut state = state.lock().unwrap();
                     state.execute_ply(Some(&ply)).ok();
 
-                    to_game.send((*color.lock().unwrap(), Message::MoveResponse(ply))).ok();
+                    to_game
+                        .send((*color.lock().unwrap(), Message::MoveResponse(ply)))
+                        .ok();
                 }
             } else if parts[1] == "Over" {
                 if parts[2] == "1-0" || parts[2] == "0-1" {
-                    to_game.send((*color.lock().unwrap(), Message::Special(parts[2].to_string()))).ok();
+                    to_game
+                        .send((
+                            *color.lock().unwrap(),
+                            Message::Special(parts[2].to_string()),
+                        ))
+                        .ok();
                     break;
                 }
             } else if parts[1] == "RequestUndo" {
                 *undo_request.lock().unwrap() = true;
-                to_game.send((*color.lock().unwrap(), Message::UndoRequest)).ok();
+                to_game
+                    .send((*color.lock().unwrap(), Message::UndoRequest))
+                    .ok();
             } else if parts[1] == "RemoveUndo" {
                 let mut undo_request = undo_request.lock().unwrap();
                 if *undo_request {
-                    to_game.send((*color.lock().unwrap(), Message::UndoRemove)).ok();
+                    to_game
+                        .send((*color.lock().unwrap(), Message::UndoRemove))
+                        .ok();
                     *undo_request = false;
                 }
             } else if parts[1] == "Undo" {
                 let mut undo_wait = undo_wait.lock().unwrap();
                 if *undo_wait {
                     *undo_wait = false;
-                    to_game.send((*color.lock().unwrap(), Message::UndoAccept)).ok();
+                    to_game
+                        .send((*color.lock().unwrap(), Message::UndoAccept))
+                        .ok();
                 }
             } else if parts[1] == "Abandoned." {
                 break;
             }
         }
 
-        to_game.send((*color.lock().unwrap(), Message::Special(String::from("Disconnected")))).ok();
+        to_game
+            .send((
+                *color.lock().unwrap(),
+                Message::Special(String::from("Disconnected")),
+            ))
+            .ok();
     });
 }
 
-pub fn post_seek(stream: &Arc<Mutex<TcpStream>>, seek: &Seek) { // XXX Does this need to be public?
-    let string = format!("{} {} {}",
-        seek.size,
-        seek.time,
-        seek.increment
-    );
+pub fn post_seek(stream: &Arc<Mutex<TcpStream>>, seek: &Seek) {
+    // XXX Does this need to be public?
+    let string = format!("{} {} {}", seek.size, seek.time, seek.increment);
 
-    let mut seek_data = vec![
-        "Seek",
-        &string
-    ];
+    let mut seek_data = vec!["Seek", &string];
 
     if let Some(color) = seek.color {
         seek_data.push(match color {
@@ -464,52 +520,67 @@ pub fn post_seek(stream: &Arc<Mutex<TcpStream>>, seek: &Seek) { // XXX Does this
 }
 
 fn evaluate_state(stream: &Arc<Mutex<TcpStream>>, state: &State, invoker: Option<String>) {
-    write_stream(&mut *stream.lock().unwrap(), &[
-        &format!("Shout Evaluating{}...", if let Some(ref invoker) = invoker {
-            format!("{}'s game", invoker)
-        } else {
-            String::new()
-        }),
-    ]).ok();
+    write_stream(
+        &mut *stream.lock().unwrap(),
+        &[&format!(
+            "Shout Evaluating{}...",
+            if let Some(ref invoker) = invoker {
+                format!("{}'s game", invoker)
+            } else {
+                String::new()
+            }
+        )],
+    )
+    .ok();
 
     let mut search = PvSearch::<State, StaticEvaluator>::with_goal(StaticEvaluator, 10, 12.0);
 
     let start_search = Instant::now();
     let analysis = search.search(&state, None);
-    let pvsearch_analysis = analysis.as_any().downcast_ref::<PvSearchAnalysis<State, StaticEvaluator>>().unwrap();
+    let pvsearch_analysis = analysis
+        .as_any()
+        .downcast_ref::<PvSearchAnalysis<State, StaticEvaluator>>()
+        .unwrap();
     let elapsed_search = start_search.elapsed();
-    let elapsed_search = elapsed_search.as_secs() as f32 + elapsed_search.subsec_nanos() as f32 / 1_000_000_000.0;
+    let elapsed_search =
+        elapsed_search.as_secs() as f32 + elapsed_search.subsec_nanos() as f32 / 1_000_000_000.0;
 
-    write_stream(&mut *stream.lock().unwrap(), &[
-        &format!("Shout{}", if let Some(ref invoker) = invoker {
-            format!(" {}'s game:", invoker)
-        } else {
-            String::new()
-        }),
-        &format!("Evaluation for {} on turn {} (depth: {}, time: {:.2}s): {}",
-            if state.ply_count % 2 == 0 {
-                "white"
-            } else {
-                "black"
-            },
-            state.ply_count / 2 + 1,
-            pvsearch_analysis.principal_variation.len(),
-            elapsed_search,
-            pvsearch_analysis.evaluation,
-        ),
-    ]).ok();
+    write_stream(
+        &mut *stream.lock().unwrap(),
+        &[
+            &format!(
+                "Shout{}",
+                if let Some(ref invoker) = invoker {
+                    format!(" {}'s game:", invoker)
+                } else {
+                    String::new()
+                }
+            ),
+            &format!(
+                "Evaluation for {} on turn {} (depth: {}, time: {:.2}s): {}",
+                if state.ply_count % 2 == 0 {
+                    "white"
+                } else {
+                    "black"
+                },
+                state.ply_count / 2 + 1,
+                pvsearch_analysis.principal_variation.len(),
+                elapsed_search,
+                pvsearch_analysis.evaluation,
+            ),
+        ],
+    )
+    .ok();
 }
 
 fn ply_to_playtak(ply: &Ply) -> String {
     fn format_square(x: usize, y: usize) -> String {
-        format!("{}{}",
-            (x as u8 + 65) as char,
-            (y as u8 + 49) as char,
-        )
+        format!("{}{}", (x as u8 + 65) as char, (y as u8 + 49) as char,)
     }
 
     match *ply {
-        Ply::Place { x, y, ref piece } => format!("P {}{}",
+        Ply::Place { x, y, ref piece } => format!(
+            "P {}{}",
             format_square(x, y),
             match *piece {
                 Piece::Flatstone(_) => "",
@@ -517,14 +588,27 @@ fn ply_to_playtak(ply: &Ply) -> String {
                 Piece::Capstone(_) => " C",
             },
         ),
-        Ply::Slide { x, y, direction, ref drops } => format!("M {} {}{}",
+        Ply::Slide {
+            x,
+            y,
+            direction,
+            ref drops,
+        } => format!(
+            "M {} {}{}",
             format_square(x, y),
             {
                 let (dx, dy) = direction.to_offset();
-                let (tx, ty) = (x as i8 + dx * drops.len() as i8, y as i8 + dy * drops.len() as i8);
+                let (tx, ty) = (
+                    x as i8 + dx * drops.len() as i8,
+                    y as i8 + dy * drops.len() as i8,
+                );
                 format_square(tx as usize, ty as usize)
             },
-            drops.iter().map(|drop| format!(" {}", drop)).collect::<Vec<_>>().join(""),
+            drops
+                .iter()
+                .map(|drop| format!(" {}", drop))
+                .collect::<Vec<_>>()
+                .join(""),
         ),
     }
 }

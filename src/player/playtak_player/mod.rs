@@ -19,13 +19,13 @@
 
 use std::any::Any;
 use std::net::TcpStream;
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 
 use zero_sum::impls::tak::{Color, Ply};
 
-use game::Message;
-use player::Player;
+use crate::game::Message;
+use crate::player::Player;
 
 pub struct PlayTakPlayer {
     host: String,
@@ -56,12 +56,20 @@ impl PlayTakPlayer {
     }
 
     pub fn get_game_info(&self) -> (usize, Color, Option<Vec<Ply>>) {
-        (*self.size.lock().unwrap(), *self.color.lock().unwrap(), self.resume_plies.lock().unwrap().clone())
+        (
+            *self.size.lock().unwrap(),
+            *self.color.lock().unwrap(),
+            self.resume_plies.lock().unwrap().clone(),
+        )
     }
 }
 
 impl Player for PlayTakPlayer {
-    fn initialize(&mut self, to_game: Sender<(Color, Message)>, _: &Player) -> Result<Sender<Message>, String> {
+    fn initialize(
+        &mut self,
+        to_game: Sender<(Color, Message)>,
+        _: &dyn Player,
+    ) -> Result<Sender<Message>, String> {
         let stream = match TcpStream::connect(self.host.as_str()) {
             Ok(stream) => Arc::new(Mutex::new(stream)),
             Err(_) => return Err(String::from("Could not connect to host.")),
@@ -80,12 +88,21 @@ impl Player for PlayTakPlayer {
 
         // Initialize client
         comm::write_client_name(&stream);
-        try!(comm::login(&stream, &message_queue, self));
+        comm::login(&stream, &message_queue, self)?;
         let game_list = comm::initialize_game(&stream, &message_queue, self);
 
         // Start main handlers
         let (sender, state, undo_request, undo_wait) = comm::start_game_handler(&stream, self);
-        comm::start_playtak_handler(&stream, message_queue, to_game, state, undo_request, undo_wait, self, game_list);
+        comm::start_playtak_handler(
+            &stream,
+            message_queue,
+            to_game,
+            state,
+            undo_request,
+            undo_wait,
+            self,
+            game_list,
+        );
 
         Ok(sender)
     }
@@ -94,7 +111,7 @@ impl Player for PlayTakPlayer {
         self.name.lock().unwrap().clone()
     }
 
-    fn as_any(&self) -> &Any {
+    fn as_any(&self) -> &dyn Any {
         self
     }
 }

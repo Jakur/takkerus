@@ -22,8 +22,8 @@ use std::str::FromStr;
 use getopts::{Matches, Options as GetOptsOptions, ParsingStyle};
 use zero_sum::impls::tak::Color;
 
-use game::Game;
-use player::{self, Player};
+use crate::game::Game;
+use crate::player::{self, Player};
 
 pub struct Options {
     options: GetOptsOptions,
@@ -61,27 +61,31 @@ impl Options {
     }
 }
 
-pub fn parse_player(game: &Game, player: &str, matches: &Matches) -> Result<(Option<Box<Player>>, Vec<String>), String> {
+pub fn parse_player(
+    game: &Game,
+    player: &str,
+    matches: &Matches,
+) -> Result<(Option<Box<dyn Player>>, Vec<String>), String> {
     if let Some(player_type) = matches.opt_str(player) {
         if player_type == "human" {
             let mut human_options = Options::new();
-            human_options
-                .opt("n", "name");
+            human_options.opt("n", "name");
 
             let matches = human_options.parse(&matches.free);
 
-            Ok((Some(Box::new(player::CliPlayer::new(&(
-                if let Some(name) = matches.opt_str("name") {
-                    name
-                } else {
-                    String::from("Human")
-                }
-            )))), matches.free))
+            Ok((
+                Some(Box::new(player::CliPlayer::new(
+                    &(if let Some(name) = matches.opt_str("name") {
+                        name
+                    } else {
+                        String::from("Human")
+                    }),
+                ))),
+                matches.free,
+            ))
         } else if player_type == "pvsearch" {
             let mut pvsearch_options = Options::new();
-            pvsearch_options
-                .opt("d", "depth")
-                .opt("g", "goal");
+            pvsearch_options.opt("d", "depth").opt("g", "goal");
 
             let matches = pvsearch_options.parse(&matches.free);
 
@@ -89,8 +93,8 @@ pub fn parse_player(game: &Game, player: &str, matches: &Matches) -> Result<(Opt
                 return Err(String::from("Both depth and goal were specified."));
             }
 
-            Ok((Some(Box::new(
-                if let Some(depth) = matches.opt_str("depth") {
+            Ok((
+                Some(Box::new(if let Some(depth) = matches.opt_str("depth") {
                     if let Ok(depth) = u8::from_str(&depth) {
                         player::PvSearchPlayer::with_depth(depth)
                     } else {
@@ -108,8 +112,9 @@ pub fn parse_player(game: &Game, player: &str, matches: &Matches) -> Result<(Opt
                     };
 
                     player::PvSearchPlayer::with_goal(goal)
-                }
-            )), matches.free))
+                })),
+                matches.free,
+            ))
         } else if player_type == "playtak" {
             let mut playtak_options = Options::new();
             playtak_options
@@ -119,14 +124,14 @@ pub fn parse_player(game: &Game, player: &str, matches: &Matches) -> Result<(Opt
 
             let matches = playtak_options.parse(&matches.free);
 
-            let host = matches.opt_str("host").unwrap_or(String::from("playtak.com:10000"));
+            let host = matches
+                .opt_str("host")
+                .unwrap_or(String::from("playtak.com:10000"));
             let user = matches.opt_str("user").unwrap_or(String::new());
             let pass = matches.opt_str("pass").unwrap_or(String::new());
 
             let mut game_type_options = Options::new();
-            game_type_options
-                .flag("", "accept")
-                .flag("", "seek");
+            game_type_options.flag("", "accept").flag("", "seek");
 
             let mut matches = game_type_options.parse(&matches.free);
 
@@ -136,18 +141,17 @@ pub fn parse_player(game: &Game, player: &str, matches: &Matches) -> Result<(Opt
 
             let game_type = if matches.opt_present("accept") {
                 let mut accept_options = Options::new();
-                accept_options
-                    .opt("f", "from");
+                accept_options.opt("f", "from");
 
                 matches = accept_options.parse(&matches.free);
 
-                player::playtak_player::GameType::accept(&(
-                    if let Some(from) = matches.opt_str("from") {
+                player::playtak_player::GameType::accept(
+                    &(if let Some(from) = matches.opt_str("from") {
                         from
                     } else {
                         return Err(String::from("--from must be specified with --accept."));
-                    }
-                ))
+                    }),
+                )
             } else {
                 let mut seek_options = Options::new();
                 seek_options
@@ -191,16 +195,13 @@ pub fn parse_player(game: &Game, player: &str, matches: &Matches) -> Result<(Opt
                     None
                 };
 
-                player::playtak_player::GameType::seek(
-                    game.header.size,
-                    time,
-                    inc,
-                    color,
-                )
+                player::playtak_player::GameType::seek(game.header.size, time, inc, color)
             };
 
             Ok((
-                Some(Box::new(player::PlayTakPlayer::new(&host, &user, &pass, game_type))),
+                Some(Box::new(player::PlayTakPlayer::new(
+                    &host, &user, &pass, game_type,
+                ))),
                 matches.free,
             ))
         } else {

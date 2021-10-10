@@ -22,12 +22,16 @@ use std::sync::mpsc::Sender;
 
 use zero_sum::impls::tak::Color;
 
-use game::Message;
+use crate::game::Message;
 
 pub trait Player {
-    fn initialize(&mut self, to_game: Sender<(Color, Message)>, opponent: &Player) -> Result<Sender<Message>, String>;
+    fn initialize(
+        &mut self,
+        to_game: Sender<(Color, Message)>,
+        opponent: &dyn Player,
+    ) -> Result<Sender<Message>, String>;
     fn get_name(&self) -> String;
-    fn as_any(&self) -> &Any;
+    fn as_any(&self) -> &dyn Any;
 }
 
 pub use self::cli_player::CliPlayer;

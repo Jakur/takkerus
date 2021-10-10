@@ -17,8 +17,6 @@
 // Copyright 2016-2017 Chris Foster
 //
 
-#![feature(conservative_impl_trait)]
-
 extern crate getopts;
 #[macro_use]
 extern crate lazy_static;
@@ -30,19 +28,17 @@ use std::env;
 use std::str::FromStr;
 
 use zero_sum::analysis::search::{PvSearch, Search};
-use zero_sum::impls::tak::*;
 use zero_sum::impls::tak::evaluator::StaticEvaluator;
+use zero_sum::impls::tak::*;
 
-use arguments::{Options, parse_player};
-use game::{Game, logger};
+use arguments::{parse_player, Options};
+use game::{logger, Game};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
 
     let mut main_options = Options::new();
-    main_options
-        .flag("h", "help")
-        .flag("v", "version");
+    main_options.flag("h", "help").flag("v", "version");
 
     let matches = main_options.parse(&args[1..]);
 
@@ -51,17 +47,22 @@ fn main() {
         println!("A playable tak board.  Supports play between any combination of humans and AIs, and can act as a PlayTak.com client.");
         println!("  Commands:");
         println!("    analyze    Use an AI to analyze a board.");
-        println!("    play       Start a game between any combination of humans and AIs. (default)");
+        println!(
+            "    play       Start a game between any combination of humans and AIs. (default)"
+        );
         println!("\n  Use 'takkerus Command --help' for more info on Command.");
         return;
     }
 
     if matches.opt_present("version") {
-        println!("Takkerus{}", if let Some(version) = option_env!("CARGO_PKG_VERSION") {
-            format!(" v{}", version)
-        } else {
-            String::from(" - version undefined")
-        });
+        println!(
+            "Takkerus{}",
+            if let Some(version) = option_env!("CARGO_PKG_VERSION") {
+                format!(" v{}", version)
+            } else {
+                String::from(" - version undefined")
+            }
+        );
         return;
     }
 
@@ -100,12 +101,12 @@ fn main() {
                     Err(error) => {
                         println!("  Error: {}", error);
                         return;
-                    },
+                    }
                 },
                 Err(error) => {
                     println!("  Error: {}", error);
                     return;
-                },
+                }
             }
         } else if let Some(size) = matches.opt_str("size") {
             if let Ok(size) = usize::from_str(&size) {
@@ -123,12 +124,10 @@ fn main() {
             State::new(5)
         };
 
-        let mut search: Box<Search<State>> = if let Some(search) = matches.opt_str("ai") {
+        let mut search: Box<dyn Search<State>> = if let Some(search) = matches.opt_str("ai") {
             if search == "pvsearch" {
                 let mut pvsearch_options = Options::new();
-                pvsearch_options
-                    .opt("d", "depth")
-                    .opt("g", "goal");
+                pvsearch_options.opt("d", "depth").opt("g", "goal");
 
                 matches = pvsearch_options.parse(&matches.free);
 
@@ -176,14 +175,14 @@ fn main() {
         println!("Analysis:\n{}", search.search(&state, None));
     } else if !matches.free.is_empty() && matches.free[0] == "play" {
         let mut play_options = arguments::Options::new();
-        play_options
-            .flag("h", "help")
-            .opt("s", "size");
+        play_options.flag("h", "help").opt("s", "size");
 
         let mut matches = play_options.parse(&matches.free[1..]);
 
         if matches.opt_present("help") {
-            println!("Usage:\n  takkerus play [-s int] [-p1 string [Options]] [-p2 string [Options]]\n");
+            println!(
+                "Usage:\n  takkerus play [-s int] [-p1 string [Options]] [-p2 string [Options]]\n"
+            );
             println!("Starts a game of Tak between any combination of humans and AIs.");
             println!("    -s, --size  INT      Specifies a blank board of Size. (default 5)");
             println!("        --p1    STRING   The type of player 1. Options are:");
@@ -198,17 +197,25 @@ fn main() {
             println!("    -n, --name  STRING   The name of the player to record. (default Human)");
             println!("\n  PVSearch options:");
             println!("    -d, --depth INT      The depth of the search.");
-            println!("    -g, --goal  INT      The number of seconds per move to aim for. (default 60)");
+            println!(
+                "    -g, --goal  INT      The number of seconds per move to aim for. (default 60)"
+            );
             println!("\n  PlayTak options:");
-            println!("    -h, --host  STRING   The host to connect to. (default \"playtak.com:10000\")");
+            println!(
+                "    -h, --host  STRING   The host to connect to. (default \"playtak.com:10000\")"
+            );
             println!("    -u, --user  STRING   The username to log in with. (default \"\" (Guest login))");
             println!("    -p, --pass  STRING   The password to use. (default \"\" (Guest login))");
             println!("\n    --accept | --seek                         (default --seek)");
             println!("\n      Accept options:");
             println!("        -f, --from  STRING   The username to accept a game from.");
             println!("      Seek options:");
-            println!("        -t, --time  INT      The number of seconds per player. (default 1200)");
-            println!("        -i, --inc   INT      The post-turn increment in seconds. (default 30)");
+            println!(
+                "        -t, --time  INT      The number of seconds per player. (default 1200)"
+            );
+            println!(
+                "        -i, --inc   INT      The post-turn increment in seconds. (default 30)"
+            );
             println!("        -c, --color STRING   The color to play. Options are:");
             println!("                               white");
             println!("                               black");
@@ -233,8 +240,7 @@ fn main() {
         }
 
         let mut p1_options = Options::new();
-        p1_options
-            .opt("", "p1");
+        p1_options.opt("", "p1");
 
         matches = p1_options.parse(&matches.free);
 
@@ -242,16 +248,15 @@ fn main() {
             Ok((player, free)) => {
                 matches.free = free;
                 player
-            },
+            }
             Err(error) => {
                 println!("  Error: {}", error);
                 return;
-            },
+            }
         };
 
         let mut p2_options = Options::new();
-        p2_options
-            .opt("", "p2");
+        p2_options.opt("", "p2");
 
         matches = p2_options.parse(&matches.free);
 
@@ -259,11 +264,11 @@ fn main() {
             Ok((player, free)) => {
                 matches.free = free;
                 player
-            },
+            }
             Err(error) => {
                 println!("  Error: {}", error);
                 return;
-            },
+            }
         };
 
         // Search for p1 again in case p2 was specified first
@@ -275,7 +280,7 @@ fn main() {
                 Err(error) => {
                     println!("  Error: {}", error);
                     return;
-                },
+                }
             };
         }
 
@@ -284,8 +289,10 @@ fn main() {
             return;
         }
 
-        game.add_player(p1.unwrap_or(Box::new(player::CliPlayer::new("Human")))).ok();
-        game.add_player(p2.unwrap_or(Box::new(player::PvSearchPlayer::with_goal(60)))).ok();
+        game.add_player(p1.unwrap_or(Box::new(player::CliPlayer::new("Human"))))
+            .ok();
+        game.add_player(p2.unwrap_or(Box::new(player::PvSearchPlayer::with_goal(60))))
+            .ok();
 
         match game.play() {
             Err(error) => println!("  Error: {}", error),

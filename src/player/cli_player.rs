@@ -19,16 +19,16 @@
 
 use std::any::Any;
 use std::io::{self, Write};
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use zero_sum::impls::tak::{Color, Piece, Ply, State};
 use zero_sum::State as StateTrait;
 
-use game::Message;
-use player::Player;
+use crate::game::Message;
+use crate::player::Player;
 
 pub struct CliPlayer {
     name: String,
@@ -43,7 +43,11 @@ impl CliPlayer {
 }
 
 impl Player for CliPlayer {
-    fn initialize(&mut self, to_game: Sender<(Color, Message)>, opponent: &Player) -> Result<Sender<Message>, String> {
+    fn initialize(
+        &mut self,
+        to_game: Sender<(Color, Message)>,
+        opponent: &dyn Player,
+    ) -> Result<Sender<Message>, String> {
         let share_stdin = opponent.as_any().is::<CliPlayer>();
         let (sender, receiver) = mpsc::channel();
 
@@ -70,10 +74,12 @@ impl Player for CliPlayer {
                         Message::GameStart(assigned_color) => {
                             data.lock().unwrap().color = assigned_color;
                             game_start.send(()).ok();
-                        },
-                        Message::MoveResponse(_) => if !share_stdin {
-                            prompt(&data);
-                        },
+                        }
+                        Message::MoveResponse(_) => {
+                            if !share_stdin {
+                                prompt(&data);
+                            }
+                        }
                         Message::MoveRequest(state) => {
                             data.lock().unwrap().state = state;
                             data.lock().unwrap().move_wait = true;
@@ -97,29 +103,37 @@ impl Player for CliPlayer {
                                     fetch_input(&input_sender);
                                 });
                             }
-                        },
-                        Message::UndoRequest => if share_stdin {
-                            to_game.send((data.lock().unwrap().color, Message::UndoAccept)).ok();
-                        } else {
-                            println!("\n  Your opponent requests an undo.");
-                            println!("  Enter \"accept\" or \"reject\".");
-                            data.lock().unwrap().undo_wait = true;
-                            prompt(&data);
-                        },
-                        Message::UndoAccept => if !share_stdin {
-                            println!("\n  Your opponent has accepted your undo request.");
-                            data.lock().unwrap().undo_request = false;
-                            prompt(&data);
-                        },
-                        Message::UndoRemove => if !share_stdin {
-                            println!("\n  Your opponent has removed their undo request.");
-                            data.lock().unwrap().undo_wait = false;
-                            prompt(&data);
-                        },
+                        }
+                        Message::UndoRequest => {
+                            if share_stdin {
+                                to_game
+                                    .send((data.lock().unwrap().color, Message::UndoAccept))
+                                    .ok();
+                            } else {
+                                println!("\n  Your opponent requests an undo.");
+                                println!("  Enter \"accept\" or \"reject\".");
+                                data.lock().unwrap().undo_wait = true;
+                                prompt(&data);
+                            }
+                        }
+                        Message::UndoAccept => {
+                            if !share_stdin {
+                                println!("\n  Your opponent has accepted your undo request.");
+                                data.lock().unwrap().undo_request = false;
+                                prompt(&data);
+                            }
+                        }
+                        Message::UndoRemove => {
+                            if !share_stdin {
+                                println!("\n  Your opponent has removed their undo request.");
+                                data.lock().unwrap().undo_wait = false;
+                                prompt(&data);
+                            }
+                        }
                         Message::GameOver => {
                             input_sender.send(Input::Quit).ok();
                             break;
-                        },
+                        }
                         _ => (),
                     }
                 }
@@ -135,18 +149,18 @@ impl Player for CliPlayer {
                 let data = data.clone();
                 let input_sender = input_sender.clone();
 
-                thread::spawn(move || {
-                    loop {
-                        thread::sleep(Duration::from_millis(100));
-                        prompt(&data);
-                        fetch_input(&input_sender);
-                    }
+                thread::spawn(move || loop {
+                    thread::sleep(Duration::from_millis(100));
+                    prompt(&data);
+                    fetch_input(&input_sender);
                 });
             }
 
             for input in input_receiver.iter() {
                 match input {
-                    Input::String(string) => parse_input(&string, &data, &input_sender, &to_game, share_stdin),
+                    Input::String(string) => {
+                        parse_input(&string, &data, &input_sender, &to_game, share_stdin)
+                    }
                     Input::Quit => break,
                 }
             }
@@ -159,7 +173,7 @@ impl Player for CliPlayer {
         self.name.clone()
     }
 
-    fn as_any(&self) -> &Any {
+    fn as_any(&self) -> &dyn Any {
         self
     }
 }
@@ -201,10 +215,18 @@ fn fetch_input(input_sender: &Sender<Input>) {
     input_sender.send(Input::String(input)).ok();
 }
 
-fn parse_input(string: &String, data: &Arc<Mutex<Data>>, input_sender: &Sender<Input>, to_game: &Sender<(Color, Message)>, share_stdin: bool) {
+fn parse_input(
+    string: &String,
+    data: &Arc<Mutex<Data>>,
+    input_sender: &Sender<Input>,
+    to_game: &Sender<(Color, Message)>,
+    share_stdin: bool,
+) {
     if string == "help" {
         println!("Commands:");
-        println!("  undo        - Sends a request to your opponent for an undo of the most recent move.");
+        println!(
+            "  undo        - Sends a request to your opponent for an undo of the most recent move."
+        );
         println!("  cancel undo - Removes your request for an undo.");
         println!("  quit        - Forfeits the game and exits.");
         println!("  [move]      - Enters your move in PTN format, e.g. a1, or 3d3<12.");
@@ -214,10 +236,14 @@ fn parse_input(string: &String, data: &Arc<Mutex<Data>>, input_sender: &Sender<I
             fetch_input(input_sender);
         }
     } else if string == "quit" {
-        to_game.send((data.lock().unwrap().color, Message::GameOver)).ok();
+        to_game
+            .send((data.lock().unwrap().color, Message::GameOver))
+            .ok();
     } else if string == "undo" {
         if share_stdin {
-            to_game.send((data.lock().unwrap().color, Message::UndoRequest)).ok();
+            to_game
+                .send((data.lock().unwrap().color, Message::UndoRequest))
+                .ok();
         } else {
             let mut data = data.lock().unwrap();
 
@@ -269,7 +295,9 @@ fn parse_input(string: &String, data: &Arc<Mutex<Data>>, input_sender: &Sender<I
             to_game.send((data.color, Message::UndoRemove)).ok();
         } else if data.undo_wait {
             println!("  You have not requested an undo.");
-            println!("  If you would like to reject your opponent's undo request, enter \"reject\",");
+            println!(
+                "  If you would like to reject your opponent's undo request, enter \"reject\","
+            );
             println!("  or make a move.");
         }
     } else {
@@ -310,11 +338,16 @@ fn parse_ply(string: &str, state: &State) -> Option<Ply> {
         Color::Black
     };
 
-    let ply = match Ply::from_ptn(string, player_color) { // XXX Move this error checking into State?
+    let ply = match Ply::from_ptn(string, player_color) {
+        // XXX Move this error checking into State?
         Some(mut ply) => {
             if state.ply_count < 2 {
                 ply = match ply {
-                    Ply::Place { piece: Piece::Flatstone(color), x, y } => Ply::Place {
+                    Ply::Place {
+                        piece: Piece::Flatstone(color),
+                        x,
+                        y,
+                    } => Ply::Place {
                         x: x,
                         y: y,
                         piece: Piece::Flatstone(color.flip()),
@@ -322,24 +355,25 @@ fn parse_ply(string: &str, state: &State) -> Option<Ply> {
                     _ => {
                         println!("  Illegal opening move.");
                         return None;
-                    },
+                    }
                 };
             }
 
             match ply {
-                Ply::Place { x, y, .. } |
-                Ply::Slide { x, y, .. } => if x >= board_size || y >= board_size {
-                    println!("  Out of bounds.");
-                    return None;
+                Ply::Place { x, y, .. } | Ply::Slide { x, y, .. } => {
+                    if x >= board_size || y >= board_size {
+                        println!("  Out of bounds.");
+                        return None;
+                    }
                 }
             }
 
             ply
-        },
+        }
         None => {
             println!("  Invalid entry.");
             return None;
-        },
+        }
     };
 
     if let Err(error) = state.execute_ply(Some(&ply)) {

@@ -25,14 +25,14 @@ use std::sync::mpsc::{self, Sender};
 use zero_sum::impls::tak::{Color, Ply, Resolution, State};
 use zero_sum::State as StateTrait;
 
-use player::{self, Player};
+use crate::player::{self, Player};
 
 pub struct Game {
     pub header: Header,
     pub plies: Vec<Ply>,
 
-    p1: Option<Box<Player>>,
-    p2: Option<Box<Player>>,
+    p1: Option<Box<dyn Player>>,
+    p2: Option<Box<dyn Player>>,
 
     p1_sender: Option<Sender<Message>>,
     p2_sender: Option<Sender<Message>>,
@@ -54,8 +54,12 @@ impl Game {
         Game {
             header: header,
             plies: plies,
-            p1: None, p2: None, p1_sender: None, p2_sender: None,
-        }.to_state()
+            p1: None,
+            p2: None,
+            p1_sender: None,
+            p2_sender: None,
+        }
+        .to_state()
     }
 
     pub fn to_state(&self) -> Result<State, String> {
@@ -65,7 +69,7 @@ impl Game {
             if let Some(state) = State::from_tps(&format!("[TPS \"{}\"]", self.header.tps)) {
                 state
             } else {
-                return Err(String::from("Invalid TPS."))
+                return Err(String::from("Invalid TPS."));
             }
         };
 
@@ -76,7 +80,7 @@ impl Game {
         }
     }
 
-    pub fn add_player(&mut self, player: Box<Player>) -> Result<(), String> {
+    pub fn add_player(&mut self, player: Box<dyn Player>) -> Result<(), String> {
         if self.p1.is_none() {
             self.p1 = Some(player);
         } else if self.p2.is_none() {
@@ -94,13 +98,13 @@ impl Game {
             let p1 = if let Some(ref mut p1) = self.p1 {
                 p1
             } else {
-                return Err(String::from("There is no first player."))
+                return Err(String::from("There is no first player."));
             };
 
             let p2 = if let Some(ref mut p2) = self.p2 {
                 p2
             } else {
-                return Err(String::from("There is no second player."))
+                return Err(String::from("There is no second player."));
             };
 
             let p1_playtak = p1.as_any().is::<player::PlayTakPlayer>();
@@ -122,18 +126,13 @@ impl Game {
                 Err(error) => return Err(error),
             }
 
-            (
-                receiver,
-                p1_playtak,
-                p2_playtak,
-            )
+            (receiver, p1_playtak, p2_playtak)
         };
 
         if p1_playtak || p2_playtak {
             let color = get_playtak_info(self).1;
 
-            if (color == Color::White && p2_playtak) ||
-               (color == Color::Black && p1_playtak) {
+            if (color == Color::White && p2_playtak) || (color == Color::Black && p1_playtak) {
                 mem::swap(&mut p1_playtak, &mut p2_playtak);
                 mem::swap(&mut self.p1, &mut self.p2);
                 mem::swap(&mut self.p1_sender, &mut self.p2_sender);
@@ -176,10 +175,18 @@ impl Game {
             let game = Game {
                 header: header,
                 plies: plies,
-                p1: None, p2: None, p1_sender: None, p2_sender: None,
+                p1: None,
+                p2: None,
+                p1_sender: None,
+                p2_sender: None,
             };
 
-            println!("  {}x{}, turn {}\n", game.header.size, game.header.size, game.to_state().unwrap().ply_count / 2 + 1);
+            println!(
+                "  {}x{}, turn {}\n",
+                game.header.size,
+                game.header.size,
+                game.to_state().unwrap().ply_count / 2 + 1
+            );
 
             println!("Resume game? (y/n)");
             loop {
@@ -199,7 +206,7 @@ impl Game {
                             self.header.round = format!("{}", logger::get_round_number(self));
                             break;
                         }
-                    },
+                    }
                     Err(e) => panic!("Error: {}", e),
                 }
             }
@@ -232,11 +239,13 @@ impl Game {
         for (color, message) in receiver.iter() {
             match message {
                 Message::MoveResponse(ply) => {
-                    if color != if self.plies.len() % 2 == 0 {
-                        Color::White
-                    } else {
-                        Color::Black
-                    } {
+                    if color
+                        != if self.plies.len() % 2 == 0 {
+                            Color::White
+                        } else {
+                            Color::Black
+                        }
+                    {
                         continue;
                     }
 
@@ -258,16 +267,20 @@ impl Game {
 
                         if let Some(resolution) = state.check_resolution() {
                             self.header.result = String::from(match resolution {
-                                Resolution::Road(color) => if color == Color::White {
-                                    "R-0"
-                                } else {
-                                    "0-R"
-                                },
-                                Resolution::Flat(color) => if color == Color::White {
-                                    "F-0"
-                                } else {
-                                    "0-F"
-                                },
+                                Resolution::Road(color) => {
+                                    if color == Color::White {
+                                        "R-0"
+                                    } else {
+                                        "0-R"
+                                    }
+                                }
+                                Resolution::Flat(color) => {
+                                    if color == Color::White {
+                                        "F-0"
+                                    } else {
+                                        "0-F"
+                                    }
+                                }
                                 Resolution::Draw => "1/2-1/2",
                             });
 
@@ -283,62 +296,67 @@ impl Game {
                         println!("Bad move");
                         self.send_message(color, Message::MoveRequest(state));
                     }
-                },
-                Message::UndoRequest => if undo_requested.is_none() {
-                    undo_requested = Some(color);
-                    self.send_message(color.flip(), Message::UndoRequest);
-                },
-                Message::UndoAccept => if let Some(undo_color) = undo_requested.clone() {
-                    if color == undo_color.flip() {
-                        undo_requested = None;
-
-                        self.plies.pop();
-                        print_game(self);
-
-                        logger::write_tmp_file(self);
-
-                        self.send_message(undo_color, Message::UndoAccept);
-                        self.send_message(
-                            if self.plies.len() % 2 == 0 {
-                                Color::White
-                            } else {
-                                Color::Black
-                            },
-                            Message::MoveRequest(self.to_state().unwrap()),
-                        );
+                }
+                Message::UndoRequest => {
+                    if undo_requested.is_none() {
+                        undo_requested = Some(color);
+                        self.send_message(color.flip(), Message::UndoRequest);
                     }
-                },
-                Message::UndoRemove => if let Some(undo_color) = undo_requested.clone() {
-                    if color == undo_color {
-                        undo_requested = None;
-                        self.send_message(color.flip(), Message::UndoRemove);
+                }
+                Message::UndoAccept => {
+                    if let Some(undo_color) = undo_requested.clone() {
+                        if color == undo_color.flip() {
+                            undo_requested = None;
+
+                            self.plies.pop();
+                            print_game(self);
+
+                            logger::write_tmp_file(self);
+
+                            self.send_message(undo_color, Message::UndoAccept);
+                            self.send_message(
+                                if self.plies.len() % 2 == 0 {
+                                    Color::White
+                                } else {
+                                    Color::Black
+                                },
+                                Message::MoveRequest(self.to_state().unwrap()),
+                            );
+                        }
                     }
-                },
+                }
+                Message::UndoRemove => {
+                    if let Some(undo_color) = undo_requested.clone() {
+                        if color == undo_color {
+                            undo_requested = None;
+                            self.send_message(color.flip(), Message::UndoRemove);
+                        }
+                    }
+                }
                 Message::GameOver => {
-                    self.header.result = String::from(if color == Color::White {
-                        "0-1"
-                    } else {
-                        "1-0"
-                    });
+                    self.header.result =
+                        String::from(if color == Color::White { "0-1" } else { "1-0" });
                     logger::write_tmp_file(self);
                     logger::finalize_tmp_file();
 
                     self.send_message(color.flip(), Message::GameOver);
                     self.send_message(color, Message::GameOver);
-                },
-                Message::Special(string) => if string == "Disconnected" || string == "0-1" || string == "1-0" {
-                    if string == "0-1" || string == "1-0" {
-                        self.header.result = string.clone();
-                        logger::write_tmp_file(self);
-                        logger::finalize_tmp_file();
-                    }
+                }
+                Message::Special(string) => {
+                    if string == "Disconnected" || string == "0-1" || string == "1-0" {
+                        if string == "0-1" || string == "1-0" {
+                            self.header.result = string.clone();
+                            logger::write_tmp_file(self);
+                            logger::finalize_tmp_file();
+                        }
 
-                    // If this is an early disconnect/end, end the game.  Otherwise, it's already over.
-                    if self.to_state().unwrap().check_resolution().is_none() {
-                        self.send_message(color.flip(), Message::GameOver);
-                        self.send_message(color, Message::GameOver);
+                        // If this is an early disconnect/end, end the game.  Otherwise, it's already over.
+                        if self.to_state().unwrap().check_resolution().is_none() {
+                            self.send_message(color.flip(), Message::GameOver);
+                            self.send_message(color, Message::GameOver);
+                        }
                     }
-                },
+                }
                 _ => (),
             }
         }
@@ -348,16 +366,20 @@ impl Game {
 
     fn send_message(&self, color: Color, message: Message) {
         match color {
-            Color::White => if let Some(ref sender) = self.p1_sender {
-                sender.send(message).ok();
-            } else {
-                panic!("No player 1 sender!");
-            },
-            Color::Black => if let Some(ref sender) = self.p2_sender {
-                sender.send(message).ok();
-            } else {
-                panic!("No player 2 sender!");
-            },
+            Color::White => {
+                if let Some(ref sender) = self.p1_sender {
+                    sender.send(message).ok();
+                } else {
+                    panic!("No player 1 sender!");
+                }
+            }
+            Color::Black => {
+                if let Some(ref sender) = self.p2_sender {
+                    sender.send(message).ok();
+                } else {
+                    panic!("No player 2 sender!");
+                }
+            }
         }
     }
 }
@@ -387,7 +409,8 @@ fn print_game(game: &Game) {
     println!("{}", state);
 
     let ptn = if state.ply_count % 2 == 0 {
-        format!("{:<5} {}",
+        format!(
+            "{:<5} {}",
             if game.plies.len() >= 2 {
                 game.plies[game.plies.len() - 2].to_ptn()
             } else {
@@ -407,11 +430,15 @@ fn print_game(game: &Game) {
     if state.check_resolution().is_some() {
         println!("Final state:     {}\n", ptn);
     } else if state.ply_count > 0 {
-        println!("Previous {}:   {}\n", if state.ply_count % 2 == 0 {
-            "turn"
-        } else {
-            "move"
-        }, ptn);
+        println!(
+            "Previous {}:   {}\n",
+            if state.ply_count % 2 == 0 {
+                "turn"
+            } else {
+                "move"
+            },
+            ptn
+        );
     } else {
         println!("\n");
     }
