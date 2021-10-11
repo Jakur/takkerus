@@ -308,10 +308,17 @@ fn main() {
         game.add_player(p2).ok();
 
         game.play().ok();
+    } else if matches.free[0] == "tei" {
+        let (s, r) = std::sync::mpsc::channel();
+        tei_loop(s);
+        identify();
+        play_game_tei(r).expect("Game ended unexpectedly");
     } else {
         println!("  Error: Unrecognized option: \"{}\".", matches.free[0]);
     }
 }
+
+use game::tei::{identify, play_game_tei, tei_loop};
 
 mod arguments;
 mod game;

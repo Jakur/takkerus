@@ -27,6 +27,14 @@ use zero_sum::State as StateTrait;
 
 use crate::player::{self, Player};
 
+pub use self::header::Header;
+pub use self::message::Message;
+
+mod header;
+pub mod logger;
+mod message;
+pub mod tei;
+
 pub struct Game {
     pub header: Header,
     pub plies: Vec<Ply>,
@@ -461,10 +469,3 @@ fn get_playtak_info(game: &Game) -> (usize, Color, Option<Vec<Ply>>) {
 
     (5, Color::White, None)
 }
-
-pub use self::header::Header;
-pub use self::message::Message;
-
-mod header;
-pub mod logger;
-mod message;
